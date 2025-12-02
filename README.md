@@ -1,20 +1,26 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# Kinetic Particle System
 
-# Run and deploy your AI Studio app
+A real-time interactive 3D particle system controlled by hand gestures, built with React, Three.js, and MediaPipe.
 
-This contains everything you need to run your app locally.
+## Overview
 
-View your app in AI Studio: https://ai.studio/apps/drive/1oE8ByP1aNHiVuYWlD_5fsSUaVNCclaUB
+This application allows users to manipulate a complex 3D particle system using their webcam. By analyzing hand gestures in real-time (detecting open palms vs. closed fists), the user can expand and contract the universe of particles.
 
-## Run Locally
+## Features
 
-**Prerequisites:**  Node.js
+- **Gesture Control**: Uses MediaPipe HandLandmarker for high-performance, client-side hand tracking to control particle physics.
+- **Generative Shapes**: Includes diverse templates such as Spiral Galaxies, Black Holes, DNA Double Helices, Tesseracts, and more.
+- **Real-time Rendering**: Powered by Three.js and React Three Fiber for smooth 60fps visuals.
+- **Customizable**: Change colors and shapes on the fly.
 
+## Usage
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+1. Allow camera access when prompted.
+2. Click "Start Hand Tracking".
+3. Show your hand to the camera:
+   - **Open Hand**: Expands the particles.
+   - **Closed Fist**: Contracts the particles.
+
+## Credits
+
+Created by Shubhu and Google AI Studio.

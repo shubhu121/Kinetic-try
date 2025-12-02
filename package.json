@@ -14,7 +14,8 @@
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "@react-three/fiber": "^9.4.2",
-    "three": "^0.181.2"
+    "three": "^0.181.2",
+    "@mediapipe/tasks-vision": "0.10.14"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

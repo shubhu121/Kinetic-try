@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { geminiLiveService } from '../services/geminiService';
+import { FilesetResolver, HandLandmarker } from '@mediapipe/tasks-vision';
 
 interface VisionControllerProps {
   onExpansionChange: (val: number) => void;
@@ -15,187 +15,199 @@ export const VisionController: React.FC<VisionControllerProps> = ({
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [stream, setStream] = useState<MediaStream | null>(null);
-  const frameIntervalRef = useRef<number | null>(null);
+  const [isModelLoading, setIsModelLoading] = useState(false);
+  const [modelReady, setModelReady] = useState(false);
+  const handLandmarkerRef = useRef<HandLandmarker | null>(null);
+  const requestRef = useRef<number | null>(null);
   const [error, setError] = useState<string | null>(null);
-  
-  // Audio Refs
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const processorRef = useRef<ScriptProcessorNode | null>(null);
-  const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
 
-  // Initialize Camera & Audio
+  // Initialize MediaPipe Model
   useEffect(() => {
-    const initMedia = async () => {
+    const initModel = async () => {
+      setIsModelLoading(true);
       try {
-        const mediaStream = await navigator.mediaDevices.getUserMedia({ 
-          video: { 
-            width: { ideal: 640 },
-            height: { ideal: 480 },
-            facingMode: 'user'
+        const vision = await FilesetResolver.forVisionTasks(
+          "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
+        );
+        handLandmarkerRef.current = await HandLandmarker.createFromOptions(vision, {
+          baseOptions: {
+            modelAssetPath: `https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task`,
+            delegate: "GPU"
           },
-          audio: {
-            sampleRate: 16000,
-            channelCount: 1,
-            echoCancellation: true
-          }
+          runningMode: "VIDEO",
+          numHands: 2
         });
-        setStream(mediaStream);
-        if (videoRef.current) {
-          videoRef.current.srcObject = mediaStream;
-          videoRef.current.play();
-        }
-      } catch (err) {
-        console.error("Camera/Mic access denied:", err);
-        setError("Camera & Mic access needed.");
+        setModelReady(true);
+        console.log("HandLandmarker loaded");
+      } catch (e) {
+        console.error("Failed to load MediaPipe:", e);
+        setError("Failed to load hand tracking model.");
+      } finally {
+        setIsModelLoading(false);
       }
     };
-
-    initMedia();
-
-    return () => {
-      if (frameIntervalRef.current) window.clearInterval(frameIntervalRef.current);
-      if (stream) stream.getTracks().forEach(track => track.stop());
-      if (audioContextRef.current) audioContextRef.current.close();
-    };
+    initModel();
   }, []);
 
-  // Frame Capture Loop
+  // Handle Camera Stream
   useEffect(() => {
-    if (!isConnected || !videoRef.current || !canvasRef.current) {
-      if (frameIntervalRef.current) {
-        window.clearInterval(frameIntervalRef.current);
-        frameIntervalRef.current = null;
+    const startCamera = async () => {
+      if (isConnected && !stream) {
+        try {
+          const mediaStream = await navigator.mediaDevices.getUserMedia({ 
+            video: { 
+              width: { ideal: 640 },
+              height: { ideal: 480 },
+              facingMode: 'user'
+            }
+          });
+          setStream(mediaStream);
+          if (videoRef.current) {
+            videoRef.current.srcObject = mediaStream;
+            videoRef.current.play();
+          }
+        } catch (err) {
+          console.error("Camera denied:", err);
+          setError("Camera access required.");
+          onConnectionChange(false);
+        }
+      } else if (!isConnected && stream) {
+        stream.getTracks().forEach(t => t.stop());
+        setStream(null);
+        if (videoRef.current) videoRef.current.srcObject = null;
+        if (requestRef.current) {
+            cancelAnimationFrame(requestRef.current);
+            requestRef.current = null;
+        }
+        // Clear canvas
+        const ctx = canvasRef.current?.getContext('2d');
+        if (ctx && canvasRef.current) ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
       }
-      return;
-    }
-
-    const ctx = canvasRef.current.getContext('2d');
-    if (!ctx) return;
-
-    // Increased to 5 FPS for better responsiveness
-    const FPS = 5; 
-
-    frameIntervalRef.current = window.setInterval(async () => {
-      if (!videoRef.current || !canvasRef.current) return;
-      
-      const v = videoRef.current;
-      if (v.readyState !== 4) return; // Wait for enough data
-
-      // Draw video frame to canvas
-      canvasRef.current.width = v.videoWidth;
-      canvasRef.current.height = v.videoHeight;
-      ctx.drawImage(v, 0, 0, v.videoWidth, v.videoHeight);
-
-      // Convert to Base64 (remove data prefix)
-      const base64 = canvasRef.current.toDataURL('image/jpeg', 0.7).split(',')[1];
-      
-      await geminiLiveService.sendFrame(base64);
-    }, 1000 / FPS);
-
-    return () => {
-      if (frameIntervalRef.current) window.clearInterval(frameIntervalRef.current);
     };
-  }, [isConnected]);
 
-  // Audio Streaming Setup
+    startCamera();
+  }, [isConnected, stream, onConnectionChange]);
+
+  // Prediction Loop
   useEffect(() => {
-    if (!isConnected || !stream) {
-        if (processorRef.current) {
-            processorRef.current.disconnect();
-            processorRef.current = null;
-        }
-        if (sourceRef.current) {
-            sourceRef.current.disconnect();
-            sourceRef.current = null;
-        }
-        if (audioContextRef.current) {
-            audioContextRef.current.close();
-            audioContextRef.current = null;
-        }
-        return;
-    }
+    if (!isConnected || !modelReady || !videoRef.current || !canvasRef.current) return;
 
-    const setupAudio = async () => {
-        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-        const audioCtx = new AudioContextClass({ sampleRate: 16000 });
-        audioContextRef.current = audioCtx;
+    const predict = () => {
+      if (!handLandmarkerRef.current || !videoRef.current || !canvasRef.current) return;
 
-        const source = audioCtx.createMediaStreamSource(stream);
-        sourceRef.current = source;
+      if (videoRef.current.currentTime > 0 && !videoRef.current.paused && !videoRef.current.ended) {
+        let startTimeMs = performance.now();
+        const results = handLandmarkerRef.current.detectForVideo(videoRef.current, startTimeMs);
 
-        const processor = audioCtx.createScriptProcessor(4096, 1, 1);
-        processorRef.current = processor;
-
-        processor.onaudioprocess = (e) => {
-            if (!isConnected) return;
-            const inputData = e.inputBuffer.getChannelData(0);
+        const ctx = canvasRef.current.getContext('2d');
+        if (ctx) {
+            canvasRef.current.width = videoRef.current.videoWidth;
+            canvasRef.current.height = videoRef.current.videoHeight;
+            ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
             
-            // Downsample/Encode to PCM 16-bit
-            const pcm16 = new Int16Array(inputData.length);
-            for (let i = 0; i < inputData.length; i++) {
-                // Clamp and scale
-                const s = Math.max(-1, Math.min(1, inputData[i]));
-                pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+            // Draw
+            ctx.save();
+            ctx.scale(-1, 1); // Mirror
+            ctx.translate(-canvasRef.current.width, 0);
+
+            let totalOpenness = 0;
+            let handCount = 0;
+
+            if (results.landmarks) {
+              for (const landmarks of results.landmarks) {
+                handCount++;
+                
+                // Draw Connectors (Simple implementation since DrawingUtils might be tricky to import via CDN)
+                ctx.strokeStyle = "#00FF00";
+                ctx.lineWidth = 2;
+                
+                const connections = HandLandmarker.HAND_CONNECTIONS;
+                for (const conn of connections) {
+                    const p1 = landmarks[conn.start];
+                    const p2 = landmarks[conn.end];
+                    ctx.beginPath();
+                    ctx.moveTo(p1.x * canvasRef.current.width, p1.y * canvasRef.current.height);
+                    ctx.lineTo(p2.x * canvasRef.current.width, p2.y * canvasRef.current.height);
+                    ctx.stroke();
+                }
+
+                // Draw Points
+                ctx.fillStyle = "#FF0000";
+                for (const p of landmarks) {
+                    ctx.beginPath();
+                    ctx.arc(p.x * canvasRef.current.width, p.y * canvasRef.current.height, 3, 0, 2 * Math.PI);
+                    ctx.fill();
+                }
+
+                // Calculate Openness Logic
+                // Reference Scale: Wrist (0) to Index MCP (5)
+                const wrist = landmarks[0];
+                const indexMCP = landmarks[5];
+                const scale = Math.sqrt(Math.pow(indexMCP.x - wrist.x, 2) + Math.pow(indexMCP.y - wrist.y, 2));
+
+                // Tips: 4 (Thumb), 8 (Index), 12 (Middle), 16 (Ring), 20 (Pinky)
+                const tips = [4, 8, 12, 16, 20];
+                let distSum = 0;
+                for (const tIndex of tips) {
+                    const tip = landmarks[tIndex];
+                    distSum += Math.sqrt(Math.pow(tip.x - wrist.x, 2) + Math.pow(tip.y - wrist.y, 2));
+                }
+                const avgDist = distSum / 5;
+                
+                // Heuristic: 
+                // Closed fist: avgDist ~ 0.8 * scale or less (fingers folded in)
+                // Open palm: avgDist ~ 2.0 * scale or more
+                // Let's normalize
+                let ratio = avgDist / (scale || 0.1);
+                
+                // Tuning
+                // Fist often around 1.0 - 1.2
+                // Open hand around 2.0 - 2.5
+                const minR = 1.0;
+                const maxR = 2.4;
+                
+                let openness = (ratio - minR) / (maxR - minR);
+                openness = Math.max(0, Math.min(1, openness));
+                
+                totalOpenness += openness;
+              }
             }
             
-            // Convert to Base64 string manually to avoid import issues
-            let binary = '';
-            const bytes = new Uint8Array(pcm16.buffer);
-            const len = bytes.byteLength;
-            for (let i = 0; i < len; i++) {
-                binary += String.fromCharCode(bytes[i]);
+            if (handCount > 0) {
+               // Smooth damping done in App.tsx, here we send raw target
+               onExpansionChange(totalOpenness / handCount);
+            } else {
+               onExpansionChange(0);
             }
-            const base64Audio = btoa(binary);
-
-            geminiLiveService.sendAudio(base64Audio);
-        };
-
-        source.connect(processor);
-        processor.connect(audioCtx.destination); // Destination is mute usually if not connected to speaker
+            
+            ctx.restore();
+        }
+      }
+      
+      requestRef.current = requestAnimationFrame(predict);
     };
 
-    setupAudio();
+    requestRef.current = requestAnimationFrame(predict);
 
     return () => {
-        if (processorRef.current) processorRef.current.disconnect();
-        if (sourceRef.current) sourceRef.current.disconnect();
-        if (audioContextRef.current) audioContextRef.current.close();
+        if (requestRef.current) cancelAnimationFrame(requestRef.current);
     };
+  }, [isConnected, modelReady]);
 
-  }, [isConnected, stream]);
 
-  const toggleConnection = async () => {
+  const toggleConnection = () => {
     if (isConnected) {
-      geminiLiveService.disconnect();
       onConnectionChange(false);
     } else {
-      try {
-        await geminiLiveService.connect({
-          onOpen: () => console.log('Connected to Gemini'),
-          onClose: () => onConnectionChange(false),
-          onError: (e) => {
-            console.error(e);
-            onConnectionChange(false);
-            setError(e.message);
-          },
-          onExpansionUpdate: (val) => {
-            onExpansionChange(val);
-          }
-        });
-        onConnectionChange(true);
-        setError(null);
-      } catch (e) {
-        console.error(e);
-        setError("Failed to connect to Gemini.");
-      }
+      onConnectionChange(true);
     }
   };
 
   return (
     <div className="flex flex-col gap-4 bg-gray-900/80 p-4 rounded-xl backdrop-blur-md border border-gray-700 w-full max-w-xs shadow-2xl">
       <div className="flex justify-between items-center mb-1">
-         <h3 className="text-sm font-semibold text-gray-300 uppercase tracking-wider">Vision Control</h3>
-         <div className={`h-2 w-2 rounded-full ${isConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
+         <h3 className="text-sm font-semibold text-gray-300 uppercase tracking-wider">Hand Tracking</h3>
+         <div className={`h-2 w-2 rounded-full ${isConnected && modelReady ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
       </div>
 
       {/* Webcam Preview */}
@@ -204,15 +216,23 @@ export const VisionController: React.FC<VisionControllerProps> = ({
           ref={videoRef} 
           muted 
           playsInline 
-          className="w-full h-full object-cover transform scale-x-[-1]" // Mirror effect
+          className="w-full h-full object-cover transform scale-x-[-1] opacity-60" 
         />
-        <canvas ref={canvasRef} className="hidden" />
+        <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" />
+        
         {error && (
           <div className="absolute inset-0 flex items-center justify-center bg-black/80 p-2 text-center text-red-400 text-xs">
             {error}
           </div>
         )}
-        {!isConnected && !error && (
+        
+        {isModelLoading && !error && (
+            <div className="absolute inset-0 flex items-center justify-center bg-black/60">
+                <span className="text-xs text-indigo-300 animate-pulse">Loading Model...</span>
+            </div>
+        )}
+
+        {!isConnected && !error && !isModelLoading && (
              <div className="absolute inset-0 flex items-center justify-center bg-black/40">
                 <span className="text-xs text-white/70">Paused</span>
              </div>
@@ -221,17 +241,18 @@ export const VisionController: React.FC<VisionControllerProps> = ({
 
       <button
         onClick={toggleConnection}
+        disabled={isModelLoading}
         className={`w-full py-2.5 px-4 rounded-lg font-medium text-sm transition-all duration-200 
           ${isConnected 
             ? 'bg-red-500/10 text-red-400 hover:bg-red-500/20 border border-red-500/30' 
-            : 'bg-indigo-600 text-white hover:bg-indigo-500 shadow-lg shadow-indigo-600/20'
+            : 'bg-indigo-600 text-white hover:bg-indigo-500 shadow-lg shadow-indigo-600/20 disabled:opacity-50 disabled:cursor-not-allowed'
           }`}
       >
-        {isConnected ? 'Disconnect' : 'Connect Gemini Vision'}
+        {isModelLoading ? 'Initializing...' : isConnected ? 'Stop Tracking' : 'Start Hand Tracking'}
       </button>
 
       <div className="text-[10px] text-gray-500 leading-tight">
-        * Hands: Open to expand, Close to contract. Audio is streamed to improve latency.
+        * Powered by MediaPipe. Open hands to expand particles. Close hands to contract.
       </div>
     </div>
   );

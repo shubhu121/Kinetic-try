@@ -9,6 +9,10 @@ export const SHAPE_LABELS: Record<ShapeType, string> = {
   [ShapeType.SATURN]: 'Saturn',
   [ShapeType.MEDITATE]: 'Meditate',
   [ShapeType.FIREWORKS]: 'Big Bang',
+  [ShapeType.GALAXY]: 'Spiral',
+  [ShapeType.BLACKHOLE]: 'Black Hole',
+  [ShapeType.DNA]: 'DNA',
+  [ShapeType.CUBE]: 'Tesseract'
 };
 
 // System instruction for the Gemini Live session

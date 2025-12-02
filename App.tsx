@@ -66,15 +66,15 @@ const App: React.FC = () => {
           </div>
           
           {/* Shape Selector - Top Right */}
-          <div className="flex flex-col gap-2 items-end">
-            <div className="bg-gray-900/80 backdrop-blur-md rounded-xl p-1.5 flex gap-1 border border-gray-700 shadow-xl">
+          <div className="flex flex-col gap-2 items-end max-w-[60%] md:max-w-xl">
+            <div className="bg-gray-900/80 backdrop-blur-md rounded-xl p-2 flex flex-wrap justify-end gap-1 border border-gray-700 shadow-xl">
                {Object.values(ShapeType).map((t) => (
                  <button
                    key={t}
                    onClick={() => setShape(t)}
-                   className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 
+                   className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 
                      ${shape === t 
-                       ? 'bg-gray-700 text-white shadow-inner' 
+                       ? 'bg-gray-700 text-white shadow-inner scale-105' 
                        : 'text-gray-400 hover:text-white hover:bg-white/5'
                      }`}
                  >

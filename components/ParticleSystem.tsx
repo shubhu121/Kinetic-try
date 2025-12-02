@@ -9,7 +9,7 @@ interface ParticleSystemProps {
   expansion: number; // 0 to 1
 }
 
-const COUNT = 3000;
+const COUNT = 4000;
 
 // Math helpers for shapes
 const getPointOnHeart = (t: number, p: number) => {
@@ -71,6 +71,91 @@ const getPointSaturn = () => {
     }
 }
 
+const getPointOnGalaxy = () => {
+  const armCount = 3;
+  // Weighted random for denser center
+  const rRandom = Math.pow(Math.random(), 0.5); 
+  const r = rRandom * 4; 
+  
+  // Angle
+  const arm = Math.floor(Math.random() * armCount);
+  const spin = 3; 
+  const theta = (arm / armCount) * Math.PI * 2 + (r * spin);
+  
+  const x = r * Math.cos(theta);
+  const z = r * Math.sin(theta);
+  const y = (Math.random() - 0.5) * (1 - rRandom) * 1.0; // Thicker at center
+  
+  // Add noise scatter
+  const noise = 0.15;
+  return new THREE.Vector3(
+      x + (Math.random()-0.5) * noise, 
+      y + (Math.random()-0.5) * noise, 
+      z + (Math.random()-0.5) * noise
+  );
+};
+
+const getPointOnBlackHole = () => {
+    // Accretion disk
+    const angle = Math.random() * Math.PI * 2;
+    // Distribution: Gap in middle (Event horizon), then dense disk fading out
+    const r = 1.2 + Math.random() * Math.random() * 3.5;
+    const y = (Math.random() - 0.5) * 0.1 * r; 
+    
+    // Few particles trapped in center
+    if (Math.random() < 0.03) {
+       return getPointOnSphere().multiplyScalar(0.4);
+    }
+    
+    return new THREE.Vector3(r * Math.cos(angle), y, r * Math.sin(angle));
+};
+
+const getPointOnDNA = () => {
+    const t = (Math.random() - 0.5) * 8; // Height range -4 to 4
+    const isStrandA = Math.random() > 0.5;
+    const r = 1.2;
+    const twist = t * 1.0;
+    
+    let x, z;
+    if (isStrandA) {
+        x = r * Math.cos(twist);
+        z = r * Math.sin(twist);
+    } else {
+        x = r * Math.cos(twist + Math.PI);
+        z = r * Math.sin(twist + Math.PI);
+    }
+    
+    // Ladders (Base pairs)
+    if (Math.random() > 0.7) {
+        const alpha = Math.random(); 
+        const x1 = r * Math.cos(twist);
+        const z1 = r * Math.sin(twist);
+        const x2 = r * Math.cos(twist + Math.PI);
+        const z2 = r * Math.sin(twist + Math.PI);
+        x = x1 + (x2 - x1) * alpha;
+        z = z1 + (z2 - z1) * alpha;
+    }
+    
+    return new THREE.Vector3(x, t, z);
+};
+
+const getPointOnCube = () => {
+    const s = 1.5; 
+    const face = Math.floor(Math.random() * 6);
+    const u = (Math.random() - 0.5) * 2 * s;
+    const v = (Math.random() - 0.5) * 2 * s;
+    
+    switch(face) {
+        case 0: return new THREE.Vector3(s, u, v);
+        case 1: return new THREE.Vector3(-s, u, v);
+        case 2: return new THREE.Vector3(u, s, v);
+        case 3: return new THREE.Vector3(u, -s, v);
+        case 4: return new THREE.Vector3(u, v, s);
+        case 5: return new THREE.Vector3(u, v, -s);
+    }
+    return new THREE.Vector3();
+};
+
 export const ParticleSystem: React.FC<ParticleSystemProps> = ({ shape, color, expansion }) => {
   const pointsRef = useRef<THREE.Points>(null);
 
@@ -94,6 +179,18 @@ export const ParticleSystem: React.FC<ParticleSystemProps> = ({ shape, color, ex
           break;
         case ShapeType.MEDITATE:
           vec = getPointMeditate();
+          break;
+        case ShapeType.GALAXY:
+          vec = getPointOnGalaxy();
+          break;
+        case ShapeType.BLACKHOLE:
+          vec = getPointOnBlackHole();
+          break;
+        case ShapeType.DNA:
+          vec = getPointOnDNA();
+          break;
+        case ShapeType.CUBE:
+          vec = getPointOnCube();
           break;
         case ShapeType.FIREWORKS:
         default:
@@ -129,8 +226,6 @@ export const ParticleSystem: React.FC<ParticleSystemProps> = ({ shape, color, ex
       const tz = positions[iz];
 
       // Expansion effect: push away from center (0,0,0)
-      // If expansion is 0 (closed), particles are tight.
-      // If expansion is 1 (open), particles explode/expand outward.
       
       // Calculate expansion vector
       const dist = Math.sqrt(tx*tx + ty*ty + tz*tz) + 0.001;
@@ -147,21 +242,27 @@ export const ParticleSystem: React.FC<ParticleSystemProps> = ({ shape, color, ex
 
       // If Fireworks, we might want chaotic scattering at high expansion
       const chaos = shape === ShapeType.FIREWORKS ? expansion * 5 : expansion * 0.5;
+      
+      // For Blackhole, maybe less expansion, more rotation, but consistent UI is better
+      // Just applying standard physics for now.
 
       const currX = tx * scale + (randoms[ix] * chaos) + (dirX * breathe);
       const currY = ty * scale + (randoms[iy] * chaos) + (dirY * breathe);
       const currZ = tz * scale + (randoms[iz] * chaos) + (dirZ * breathe);
-
-      // Smooth interpolation handled by React state updates is okay, 
-      // but doing it per frame in shader or here is smoother. 
-      // Since we reconstruct geometry only on shape change, we modify current positions here.
       
       positionsAttribute.setXYZ(i, currX, currY, currZ);
     }
     positionsAttribute.needsUpdate = true;
     
-    // Rotate the whole group slowly
-    pointsRef.current.rotation.y = time * 0.1 * (1 + expansion);
+    // Rotate the whole group
+    // DNA and Blackhole look better with faster rotation
+    const baseSpeed = 0.1;
+    const extraSpeed = (shape === ShapeType.BLACKHOLE || shape === ShapeType.GALAXY) ? 0.2 : 0;
+    
+    pointsRef.current.rotation.y = time * (baseSpeed + extraSpeed) * (1 + expansion);
+    if (shape === ShapeType.DNA) {
+        pointsRef.current.rotation.z = Math.sin(time * 0.5) * 0.2; // Slight tilt wobble for DNA
+    }
   });
 
   return (
@@ -170,17 +271,18 @@ export const ParticleSystem: React.FC<ParticleSystemProps> = ({ shape, color, ex
         <bufferAttribute
           attach="attributes-position"
           count={COUNT}
-          array={new Float32Array(COUNT * 3)} // Init with zeros, filled in useFrame/useEffect
+          array={new Float32Array(COUNT * 3)}
           itemSize={3}
         />
       </bufferGeometry>
       <pointsMaterial
-        size={0.08}
+        size={0.06}
         color={color}
         transparent
-        opacity={0.8}
+        opacity={0.85}
         blending={THREE.AdditiveBlending}
         sizeAttenuation={true}
+        depthWrite={false}
       />
     </points>
   );
