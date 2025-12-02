@@ -7,6 +7,7 @@ interface ParticleSystemProps {
   shape: ShapeType;
   color: string;
   expansion: number; // 0 to 1
+  audioLevelRef: React.MutableRefObject<number>;
 }
 
 const COUNT = 4000;
@@ -156,7 +157,7 @@ const getPointOnCube = () => {
     return new THREE.Vector3();
 };
 
-export const ParticleSystem: React.FC<ParticleSystemProps> = ({ shape, color, expansion }) => {
+export const ParticleSystem: React.FC<ParticleSystemProps> = ({ shape, color, expansion, audioLevelRef }) => {
   const pointsRef = useRef<THREE.Points>(null);
 
   // Generate target positions based on shape
@@ -214,6 +215,9 @@ export const ParticleSystem: React.FC<ParticleSystemProps> = ({ shape, color, ex
     const time = clock.getElapsedTime();
     const positionsAttribute = pointsRef.current.geometry.attributes.position;
     
+    // Get Audio Level (0 to 1 range usually, sometimes higher)
+    const audioScale = audioLevelRef.current || 0;
+    
     // Animate positions directly
     for (let i = 0; i < COUNT; i++) {
       const ix = i * 3;
@@ -226,29 +230,28 @@ export const ParticleSystem: React.FC<ParticleSystemProps> = ({ shape, color, ex
       const tz = positions[iz];
 
       // Expansion effect: push away from center (0,0,0)
-      
-      // Calculate expansion vector
       const dist = Math.sqrt(tx*tx + ty*ty + tz*tz) + 0.001;
       const dirX = tx / dist;
       const dirY = ty / dist;
       const dirZ = tz / dist;
 
-      // Dynamic multiplier based on expansion prop
-      // 1.0 expansion = 2x size + jitter
-      const scale = 1 + (expansion * 2.5); 
+      // Dynamic multiplier based on expansion prop AND Audio
+      // Audio adds a "pulse" on top of the expansion
+      // Multiplier: 1.0 (base) + handExpansion + audioPulse
+      const scale = 1 + (expansion * 2.5) + (audioScale * 1.5); 
       
       // Add some "breathing" or "life" based on time
       const breathe = Math.sin(time * 2 + i) * 0.1;
+      
+      // Audio "Jitter" - higher energy vibrates particles more
+      const jitter = audioScale * 0.2;
 
       // If Fireworks, we might want chaotic scattering at high expansion
       const chaos = shape === ShapeType.FIREWORKS ? expansion * 5 : expansion * 0.5;
-      
-      // For Blackhole, maybe less expansion, more rotation, but consistent UI is better
-      // Just applying standard physics for now.
 
-      const currX = tx * scale + (randoms[ix] * chaos) + (dirX * breathe);
-      const currY = ty * scale + (randoms[iy] * chaos) + (dirY * breathe);
-      const currZ = tz * scale + (randoms[iz] * chaos) + (dirZ * breathe);
+      const currX = tx * scale + (randoms[ix] * chaos) + (dirX * breathe) + (randoms[ix] * jitter);
+      const currY = ty * scale + (randoms[iy] * chaos) + (dirY * breathe) + (randoms[iy] * jitter);
+      const currZ = tz * scale + (randoms[iz] * chaos) + (dirZ * breathe) + (randoms[iz] * jitter);
       
       positionsAttribute.setXYZ(i, currX, currY, currZ);
     }
@@ -259,7 +262,10 @@ export const ParticleSystem: React.FC<ParticleSystemProps> = ({ shape, color, ex
     const baseSpeed = 0.1;
     const extraSpeed = (shape === ShapeType.BLACKHOLE || shape === ShapeType.GALAXY) ? 0.2 : 0;
     
-    pointsRef.current.rotation.y = time * (baseSpeed + extraSpeed) * (1 + expansion);
+    // Audio increases rotation speed slightly
+    const audioRotation = audioScale * 0.5;
+    
+    pointsRef.current.rotation.y = time * (baseSpeed + extraSpeed + audioRotation) * (1 + expansion);
     if (shape === ShapeType.DNA) {
         pointsRef.current.rotation.z = Math.sin(time * 0.5) * 0.2; // Slight tilt wobble for DNA
     }

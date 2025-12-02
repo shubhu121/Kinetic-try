@@ -3,6 +3,7 @@ import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Stars } from '@react-three/drei';
 import { ParticleSystem } from './components/ParticleSystem';
 import { VisionController } from './components/VisionController';
+import { useAudioSource } from './hooks/useAudioSource';
 import { ShapeType } from './types';
 import { SHAPE_LABELS, INITIAL_COLOR, INITIAL_SHAPE } from './constants';
 
@@ -11,6 +12,9 @@ const App: React.FC = () => {
   const [color, setColor] = useState<string>(INITIAL_COLOR);
   const [expansion, setExpansion] = useState<number>(0); // 0 to 1
   const [isConnected, setIsConnected] = useState(false);
+  
+  // Audio Hook
+  const { isAudioEnabled, toggleAudio, audioLevelRef } = useAudioSource();
   
   // Ref for smooth animation of the expansion value from the API
   const targetExpansionRef = useRef(0);
@@ -47,7 +51,12 @@ const App: React.FC = () => {
           <ambientLight intensity={0.5} />
           <pointLight position={[10, 10, 10]} intensity={1} />
           
-          <ParticleSystem shape={shape} color={color} expansion={expansion} />
+          <ParticleSystem 
+            shape={shape} 
+            color={color} 
+            expansion={expansion} 
+            audioLevelRef={audioLevelRef}
+          />
           
           <OrbitControls enableZoom={true} enablePan={false} autoRotate={!isConnected} autoRotateSpeed={0.5} />
         </Canvas>
@@ -95,9 +104,33 @@ const App: React.FC = () => {
             onConnectionChange={setIsConnected}
           />
 
-          {/* Color & Status (Bottom Right) */}
+          {/* Color & Status & Audio (Bottom Right) */}
           <div className="flex flex-col items-end gap-4">
             
+            {/* Audio Toggle */}
+             <button
+                onClick={toggleAudio}
+                className={`flex items-center gap-2 px-4 py-2 rounded-full font-medium text-xs backdrop-blur-md border transition-all duration-300 ${
+                  isAudioEnabled 
+                    ? 'bg-pink-500/20 text-pink-300 border-pink-500/50 animate-pulse' 
+                    : 'bg-gray-800/80 text-gray-400 border-gray-700 hover:bg-gray-700'
+                }`}
+              >
+                {isAudioEnabled ? (
+                  <>
+                     <span className="w-2 h-2 rounded-full bg-pink-500" />
+                     Listening...
+                  </>
+                ) : (
+                  <>
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                    </svg>
+                    Enable Mic
+                  </>
+                )}
+             </button>
+
             {/* Expansion Indicator */}
             <div className="bg-gray-900/80 backdrop-blur-md p-4 rounded-xl border border-gray-700 w-64 shadow-xl">
                <div className="flex justify-between text-xs text-gray-400 mb-2 font-medium uppercase">

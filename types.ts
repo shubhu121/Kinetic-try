@@ -28,3 +28,10 @@ declare global {
     interface IntrinsicElements extends ThreeElements {}
   }
 }
+
+// Augment React namespace to include Three.js elements for R3F (required for certain TS configurations)
+declare module 'react' {
+  namespace JSX {
+    interface IntrinsicElements extends ThreeElements {}
+  }
+}
